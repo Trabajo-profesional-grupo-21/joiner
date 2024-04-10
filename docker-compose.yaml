@@ -1,0 +1,17 @@
+version: "3"
+
+services:
+  joiner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: joiner
+    environment:
+    - PYTHONUNBUFFERED=1
+    - ID=joiner
+    networks:
+      - custom_network
+
+networks:
+  custom_network:
+    external: true
