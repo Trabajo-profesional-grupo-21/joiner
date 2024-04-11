@@ -1,4 +1,4 @@
-from .Connection import Connection
+from common.connection import Connection
 import ujson as json
 import signal
 import logging
