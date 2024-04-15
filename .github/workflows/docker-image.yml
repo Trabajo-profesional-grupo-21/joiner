@@ -1,0 +1,45 @@
+name: Docker Image CI
+
+on:
+  push:
+    branches:
+      - "main"
+    tags:
+      - 'staging'
+
+    
+jobs:
+
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+    
+    - name: Install doctl
+      uses: digitalocean/action-doctl@v2
+      with:
+        token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+  
+    - name: Login to Docker Hub
+      run: echo "${{ secrets.DOCKER_ACCESS_TOKEN }}" | docker login -u tppg21 --password-stdin
+      
+    - name: Build the Docker image
+      run: docker build -t tppg21/joiner:$(git rev-parse --short HEAD) .
+
+    - name: Push Docker image
+      run: docker push tppg21/joiner:$(git rev-parse --short HEAD)
+
+    - name: Update deployment file
+      run: TAG=$(git rev-parse --short HEAD) && sed -i 's|<IMAGE>|tppg21/joiner:'${TAG}'|' $GITHUB_WORKSPACE/k8s.yaml
+
+    - name: Save DigitalOcean kubeconfig with short-lived credentials
+      run: doctl kubernetes cluster kubeconfig save --expiry-seconds 600 ${{ secrets.CLUSTER_NAME }}
+
+    - name: Deploy to DigitalOcean Kubernetes
+      run: kubectl apply -f $GITHUB_WORKSPACE/k8s.yaml
+
+    - name: Verify deployment
+      run: kubectl rollout status deployment/joiner
