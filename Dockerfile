@@ -6,7 +6,7 @@ RUN pip install --upgrade pip
 RUN pip3 install pika
 RUN pip3 install ujson
 
-RUN pip3 install git+https://github.com/Trabajo-profesional-grupo-21/common.git@0.0.1#egg=common
+RUN pip3 install git+https://github.com/Trabajo-profesional-grupo-21/common.git@0.0.2#egg=common
 
 COPY / /
 
