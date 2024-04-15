@@ -2,14 +2,14 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    app: api
-  name: api
+    app: joiner
+  name: joiner
   namespace: default
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: api
+      app: joiner
   strategy:
     rollingUpdate:
       maxSurge: 25%
@@ -19,12 +19,12 @@ spec:
   template:
     metadata:
       labels:
-        app: api
+        app: joiner
     spec:
       containers:
       - image: <IMAGE> # Replaced in CI
         imagePullPolicy: IfNotPresent
-        name: api
+        name: joiner
         resources: 
           requests:
             cpu: 150m
