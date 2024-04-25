@@ -3,6 +3,7 @@ import ujson as json
 import signal
 import logging
 from bisect import insort
+import pusher
 
 
 
@@ -13,7 +14,8 @@ class Joiner():
         signal.signal(signal.SIGTERM, self._handle_sigterm)
 
         self.counter = 0
-        self.connection = Connection()
+        # self.connection = Connection(host="rabbitmq-0.rabbitmq.default.svc.cluster.local", port=5672)
+        self.connection = Connection(host='moose.rmq.cloudamqp.com', port=5672, virtual_host="zacfsxvy", user="zacfsxvy", password="zfCu8hS9snVGmySGhtvIVeMi6uvYssih")
         self.input_queue = self.connection.Consumer(queue_name="processed")
 
         self.output_queue = self.connection.Producer(queue_name="ordered_batches")
@@ -21,6 +23,14 @@ class Joiner():
         self.current_batches_arousal = {}
         self.current_batches_valence = {}
         self.current_batches = {}
+        
+        self.pusher_client = pusher.Pusher(
+                                app_id='1792707',
+                                key='65ed053bcc05120e69f6',
+                                secret='60ee6d02f94677674c1c',
+                                cluster='us2',
+                                ssl=True
+                            )
 
 
     def _handle_sigterm(self, *args):
@@ -38,7 +48,7 @@ class Joiner():
         batch_id = body['batch_id'] 
         output = {}
         complete_batch = False
-        logging.info(f"Origin {origin}")
+        # logging.info(f"Origin {origin}")
         if origin == "valence":
             if batch_id in self.current_batches_arousal.keys():
                 #logging.info(f"Tengo arousal y valencia del batch {batch_id}")
@@ -69,7 +79,7 @@ class Joiner():
                 merged_replies = {}
                 for key, value in valence_replies.items():
                     merged_frame_info = value.copy()
-                    logging.info(f"busco key {key} en body {body['replies'].keys()}") 
+                    # logging.info(f"busco key {key} en body {body['replies'].keys()}") 
                     merged_frame_info.update(body['replies'][key])
                     merged_replies[key] = merged_frame_info
                 #logging.info(f"merge info {merged_replies}")
@@ -105,8 +115,9 @@ class Joiner():
             # Chequear si para tpdp el batch tengo info (arousal y valencia)
             reply = {"user_id": user, "batch_id": first_batch, "batch": data}
 
-            logging.info(f"Sending batch {first_batch} de {user}")
+            # logging.info(f"Sending batch {first_batch} de {user}")
             self.output_queue.send(json.dumps(reply))
+            self.pusher_client.trigger('my-channel', 'my-event', reply)
             if len(current_batches) == 0:
                 break
             first_batch = current_batches[0][0]
