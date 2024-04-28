@@ -13,10 +13,13 @@ class Joiner():
         self.running = True
         signal.signal(signal.SIGTERM, self._handle_sigterm)
         self.counter = 0
-        self.last_batches= {}
+
+        self.last_batches = {}
         self.current_batches_arousal = {}
         self.current_batches_valence = {}
         self.current_batches = {}
+        self.last_amount = {}
+
         self.init_conn()
         
 
@@ -50,9 +53,37 @@ class Joiner():
         logging.info('SIGTERM received - Shutting server down')
         self.connection.close()
     
+    def remove_user(self, user):
+        batches_sent = self.last_batches.get(user, None)
+        if batches_sent is None:
+            return
+
+        total_batches = self.last_amount.get(user, None)
+        if total_batches is None:
+            return
+
+        if total_batches == batches_sent:
+            self.current_batches.pop(user, None)
+            self.current_batches_arousal.pop(user, None)
+            self.current_batches_valence.pop(user, None)
+            self.last_amount.pop(user, None)
+            self.last_batches.pop(user, None)
+
+
     def _check_batch(self, body: dict):
         # puede ser de arousal o valencia
         body = json.loads(body.decode())
+
+        logging.info(body)
+        logging.info(self.last_batches)
+        logging.info("=========")
+
+        if "EOF" in body:
+            amount = body["total"]
+            user = body["EOF"]
+            self.last_amount[user] = amount
+            self.remove_user(user)
+            return None, False
 
         origin = body['origin']
         batch_id = body['batch_id'] 
@@ -101,10 +132,12 @@ class Joiner():
             else: 
                 del body['origin']
                 self.current_batches_arousal[batch_id] = body        
-        return output,complete_batch
+
+        return output, complete_batch
 
     def _callback(self, body: dict, ack_tag):
         batch, complete_batch = self._check_batch(body)
+
         if not complete_batch:
             return
         # si hubo merge, esto se sigue
@@ -125,7 +158,6 @@ class Joiner():
             # Chequear si para tpdp el batch tengo info (arousal y valencia)
             reply = {"user_id": user, "batch_id": first_batch, "batch": data}
 
-            print(len(json.dumps(reply)))
             # logging.info(f"Sending batch {first_batch} de {user}")
             self.output_queue.send(json.dumps(reply))
             # self.pusher_client.trigger('my-channel', 'my-event', reply)
@@ -134,6 +166,7 @@ class Joiner():
             first_batch = current_batches[0][0]
         
         self.current_batches[user] = current_batches
+        self.remove_user(user)
 
     def run(self):
         self.input_queue.receive(self._callback)
