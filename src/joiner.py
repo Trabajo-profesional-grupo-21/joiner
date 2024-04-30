@@ -4,6 +4,7 @@ import signal
 import logging
 from bisect import insort
 import pusher
+import redis
 
 
 
@@ -14,8 +15,9 @@ class Joiner():
         signal.signal(signal.SIGTERM, self._handle_sigterm)
 
         self.counter = 0
+        self.connection = Connection(host="rabbitmq")
         # self.connection = Connection(host="rabbitmq-0.rabbitmq.default.svc.cluster.local", port=5672)
-        self.connection = Connection(host='moose.rmq.cloudamqp.com', port=5672, virtual_host="zacfsxvy", user="zacfsxvy", password="zfCu8hS9snVGmySGhtvIVeMi6uvYssih")
+        # self.connection = Connection(host='moose.rmq.cloudamqp.com', port=5672, virtual_host="zacfsxvy", user="zacfsxvy", password="zfCu8hS9snVGmySGhtvIVeMi6uvYssih")
         self.input_queue = self.connection.Consumer(queue_name="processed")
 
         self.output_queue = self.connection.Producer(queue_name="ordered_batches")
@@ -23,14 +25,20 @@ class Joiner():
         self.current_batches_arousal = {}
         self.current_batches_valence = {}
         self.current_batches = {}
+
+        self.redis = redis.Redis(
+            host='redis-10756.c14.us-east-1-2.ec2.redns.redis-cloud.com',
+            port=10756,
+            password='ZpAbSOT5O38zckuiQKsYLrgwzu0g1mMF'
+        )
         
-        self.pusher_client = pusher.Pusher(
-                                app_id='1792707',
-                                key='65ed053bcc05120e69f6',
-                                secret='60ee6d02f94677674c1c',
-                                cluster='us2',
-                                ssl=True
-                            )
+        # self.pusher_client = pusher.Pusher(
+        #                         app_id='1792707',
+        #                         key='65ed053bcc05120e69f6',
+        #                         secret='60ee6d02f94677674c1c',
+        #                         cluster='us2',
+        #                         ssl=True
+        #                     )
 
 
     def _handle_sigterm(self, *args):
@@ -101,7 +109,7 @@ class Joiner():
         user = batch['user_id']
         batch_id = int(batch['batch_id'])
 
-        logging.info(f"Recibo batch {batch_id} de {user} -- batch {batch}")
+        # logging.info(f"Recibo batch {batch_id} de {user} -- batch {batch}")
         
         current_batches = self.current_batches.get(user, [])
         insort(current_batches, (batch_id, batch["replies"]))
@@ -116,8 +124,10 @@ class Joiner():
             reply = {"user_id": user, "batch_id": first_batch, "batch": data}
 
             # logging.info(f"Sending batch {first_batch} de {user}")
-            self.output_queue.send(json.dumps(reply))
-            self.pusher_client.trigger('my-channel', 'my-event', reply)
+            # logging.info(f"Len batch {len(json.dumps(reply))}")
+            # self.output_queue.send(json.dumps(reply))
+            # self.pusher_client.trigger('my-channel', 'my-event', reply)
+            self.redis.set(f'{user}-{batch_id}', json.dumps(reply))
             if len(current_batches) == 0:
                 break
             first_batch = current_batches[0][0]
