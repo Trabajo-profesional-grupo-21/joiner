@@ -15,7 +15,7 @@ class Joiner():
 
         self.counter = 0
         # self.connection = Connection(host="rabbitmq-0.rabbitmq.default.svc.cluster.local", port=5672)
-        self.connection = Connection(host='moose.rmq.cloudamqp.com', port=5672, virtual_host="zacfsxvy", user="zacfsxvy", password="zfCu8hS9snVGmySGhtvIVeMi6uvYssih")
+        self.connection = Connection(host='rabbitmq')
         self.input_queue = self.connection.Consumer(queue_name="processed")
 
         self.output_queue = self.connection.Producer(queue_name="ordered_batches")
@@ -101,7 +101,7 @@ class Joiner():
         user = batch['user_id']
         batch_id = int(batch['batch_id'])
 
-        logging.info(f"Recibo batch {batch_id} de {user} -- batch {batch}")
+        logging.info(f"Recibo batch {batch_id} de {user} -- batch")
         
         current_batches = self.current_batches.get(user, [])
         insort(current_batches, (batch_id, batch["replies"]))
@@ -115,9 +115,9 @@ class Joiner():
             # Chequear si para tpdp el batch tengo info (arousal y valencia)
             reply = {"user_id": user, "batch_id": first_batch, "batch": data}
 
-            # logging.info(f"Sending batch {first_batch} de {user}")
+            logging.info(f"Sending batch {first_batch} de {user}")
             self.output_queue.send(json.dumps(reply))
-            self.pusher_client.trigger('my-channel', 'my-event', reply)
+            # self.pusher_client.trigger('my-channel', 'my-event', reply)
             if len(current_batches) == 0:
                 break
             first_batch = current_batches[0][0]
