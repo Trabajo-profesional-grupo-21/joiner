@@ -25,6 +25,37 @@ spec:
       - image: <IMAGE> # Replaced in CI
         imagePullPolicy: IfNotPresent
         name: joiner
+        env:
+          - name: RABBIT_HOST
+            valueFrom:
+              secretKeyRef:
+                name: rabbit-credentials
+                key: RABBIT_HOST
+          - name: RABBIT_PORT
+            valueFrom:
+              secretKeyRef:
+                name: rabbit-credentials
+                key: RABBIT_PORT
+          - name: RABBIT_VHOST
+            valueFrom:
+              secretKeyRef:
+                name: rabbit-credentials
+                key: RABBIT_VHOST
+          - name: RABBIT_USER
+            valueFrom:
+              secretKeyRef:
+                name: rabbit-credentials
+                key: RABBIT_USER
+          - name: RABBIT_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: rabbit-credentials
+                key: RABBIT_PASSWORD
+          - name: REMOTE_RABBIT
+            valueFrom:
+              secretKeyRef:
+                name: rabbit-credentials
+                key: REMOTE_RABBIT
         resources: 
           requests:
             cpu: 150m
