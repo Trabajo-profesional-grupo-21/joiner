@@ -112,7 +112,7 @@ class Joiner():
         return output, complete_batch
 
     def process_image(self, body):
-        print(body)
+
         origin = body['origin']
         image_id = body['img_name']
         user = body["user_id"]
@@ -152,7 +152,7 @@ class Joiner():
         else:
             return self.process_income(body)
 
-    def _callback(self, body: dict, ack_tag):        
+    def _callback(self, body: dict, ack_tag):     
         batch, complete_batch = self._check_batch(body)
         if not complete_batch:
             return
