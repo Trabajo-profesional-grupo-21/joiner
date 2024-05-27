@@ -126,7 +126,15 @@ class Joiner():
         self.current_images[image_id] = current_image
         
         if len(current_image) == 2:
-            reply = {"user_id": user, "img_name": image_id, "batch": current_image}
+            batch = {
+                "0": {
+                    "ActionUnit": current_image['arousal']['0']['ActionUnit'],
+                    "arousal": current_image['arousal']['0']['arousal'],
+                    "valence": current_image['valence']['0']['valence'],
+                    "emotions": current_image['valence']['0']['emotions'],
+                }
+            }
+            reply = {"user_id": user, "img_name": image_id, "batch": batch}
             
             key = f'{user}-{image_id}'
             self.redis.rpush(key, json.dumps(reply))
