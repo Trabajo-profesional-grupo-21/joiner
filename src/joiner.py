@@ -3,12 +3,14 @@ import ujson as json
 import signal
 import logging
 from bisect import insort
-import pusher
 import redis
 import datetime
 import os
 from dotenv import load_dotenv
+import pymongo
+from .crud import update
 
+load_dotenv()
 
 
 class Joiner():
@@ -27,10 +29,14 @@ class Joiner():
         self.init_conn()
 
         self.redis = redis.Redis(
-            host='redis-10756.c14.us-east-1-2.ec2.redns.redis-cloud.com',
+            host=os.getenv("REDIS_HOST"),
             port=10756,
-            password='ZpAbSOT5O38zckuiQKsYLrgwzu0g1mMF'
+            password=os.getenv("REDIS_PASSWORD")
         )
+
+        mongo_client = pymongo.MongoClient(os.getenv("MONGODB_URL"))
+        db_name = os.getenv("MONGODB_DB_NAME")
+        self.db = mongo_client[db_name]
 
     def init_conn(self):
         remote_rabbit = os.getenv('REMOTE_RABBIT', False)
@@ -95,6 +101,8 @@ class Joiner():
             output["user_id"] = body["user_id"]
             output["batch_id"] = body["batch_id"]
             output["replies"] = merged_replies
+            output["file_name"] = body['file_name']
+            output["upload"] = body['upload']
             complete_batch = True
             del other[batch_id]
         else: 
@@ -104,10 +112,13 @@ class Joiner():
         return output, complete_batch
 
     def process_image(self, body):
+
         origin = body['origin']
         image_id = body['img_name']
         user = body["user_id"]
         data = body["reply"]
+        file_name = body['file_name']
+        upload = body['upload']
         del body['origin']
 
         current_image = self.current_images.get(image_id, {})
@@ -115,9 +126,22 @@ class Joiner():
         self.current_images[image_id] = current_image
         
         if len(current_image) == 2:
-            reply = {"user_id": user, "img_name": image_id, "batch": current_image}
-            self.redis.rpush(f'{user}-{image_id}', json.dumps(reply))
+            batch = {
+                "0": {
+                    "ActionUnit": current_image['arousal']['0']['ActionUnit'],
+                    "arousal": current_image['arousal']['0']['arousal'],
+                    "valence": current_image['valence']['0']['valence'],
+                    "emotions": current_image['valence']['0']['emotions'],
+                }
+            }
+            reply = {"user_id": user, "img_name": image_id, "batch": batch}
+            
+            key = f'{user}-{image_id}'
+            self.redis.rpush(key, json.dumps(reply))
+            self.redis.expire(key, 3600)
             self.current_images.pop(image_id)
+            if upload:
+                update(self.db, user, file_name, reply, "image")
         
         return None, False
 
@@ -136,13 +160,15 @@ class Joiner():
         else:
             return self.process_income(body)
 
-    def _callback(self, body: dict, ack_tag):
+    def _callback(self, body: dict, ack_tag):     
         batch, complete_batch = self._check_batch(body)
         if not complete_batch:
             return
         # si hubo merge, esto se sigue
         user = batch['user_id']
         batch_id = int(batch['batch_id'])
+        file_name = batch['file_name']
+        upload = batch['upload']
 
         # logging.info(f"Recibo batch {batch_id} de {user} -- batch {batch}")
         
@@ -163,8 +189,13 @@ class Joiner():
             # self.output_queue.send(json.dumps(reply))
             # self.pusher_client.trigger('my-channel', 'my-event', reply)
             logging.info(f"Sending batch {batch_id} de {user}: {datetime.datetime.now()}")
-            self.redis.set(f'{user}-{batch_id}', json.dumps(reply))
 
+            key = f'{user}-{file_name}-{batch_id}'
+            self.redis.set(key, json.dumps(reply))
+            self.redis.expire(key, 3600)
+
+            if upload:
+                update(self.db, user, file_name, reply, "video")
             
             if len(current_batches) == 0:
                 break
