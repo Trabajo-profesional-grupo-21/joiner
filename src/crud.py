@@ -2,8 +2,6 @@
 
 def update(db, user_id: str, file_name: str, new_data: dict, type: str = 'video'):
     try:
-        print(user_id)
-        print(file_name)
         file_name = f"{user_id}-{file_name}"
         if type == "video":
             data = db["data"].find_one_and_update({"user_id": user_id, "file_name": file_name}, 
