@@ -18,13 +18,8 @@ class Joiner():
         self.running = True
         signal.signal(signal.SIGTERM, self._handle_sigterm)
 
-        self.counter = 0
-        self.last_batches= {}
-        self.current_batches_arousal = {}
-        self.current_batches_valence = {}
         self.current_batches = {}
         self.current_images = {}
-        self.last_amount = {}
 
         self.init_conn()
 
@@ -59,71 +54,50 @@ class Joiner():
         """
         logging.info('SIGTERM received - Shutting server down')
         self.connection.close()
-    
-    def remove_user(self, user):
-        batches_sent = self.last_batches.get(user, None)
-        if batches_sent is None:
+
+    def process_video(self, body):
+        user_id = body['user_id']
+        batch_id = body['batch_id']
+        file_name = body['file_name']
+
+        batch_key = f"{user_id}-{file_name}-{batch_id}"
+
+        if batch_key not in self.current_batches:
+            reply = {"user_id": user_id, "batch_id": batch_id, "batch": body["replies"]}
+            self.current_batches[batch_key] = reply
             return
 
-        total_batches = self.last_amount.get(user, None)
-        if total_batches is None:
-            return
+        reply = self.current_batches.pop(batch_key)
 
-        if total_batches == batches_sent:
-            logging.info(f"Removing {user}")
-            self.current_batches.pop(user, None)
-            self.current_batches_arousal.pop(user, None)
-            self.current_batches_valence.pop(user, None)
-            self.last_amount.pop(user, None)
-            self.last_batches.pop(user, None)
+        merged_replies = {}
 
-    def process_income(self, body):
-        origin = body['origin']
-        batch_id = body['batch_id'] 
-        output = {}
-        current = self.current_batches_valence
-        other = self.current_batches_arousal
-        if origin == "arousal":
-            current = self.current_batches_arousal
-            other = self.current_batches_valence
+        current_data = reply["batch"]
+        for key, value in current_data.items():
+            merged_frame_info = value.copy()
+            merged_frame_info.update(body['replies'][key])
+            merged_replies[key] = merged_frame_info
 
-        complete_batch = False
-        if batch_id in other.keys():
-            current_arousal = other[batch_id]
-            arousal_replies = current_arousal['replies']
-            merged_replies = {}
-            for key, value in arousal_replies.items():
-                if not value: # OpenFace no detecto caras y devuelve None
-                    value = {}
-                merged_frame_info = value.copy()
-                merged_frame_info.update(body['replies'][key])
-                merged_replies[key] = merged_frame_info
-            output["user_id"] = body["user_id"]
-            output["batch_id"] = body["batch_id"]
-            output["replies"] = merged_replies
-            output["file_name"] = body['file_name']
-            output["upload"] = body['upload']
-            complete_batch = True
-            del other[batch_id]
-        else: 
-            del body['origin']
-            current[batch_id] = body
-        
-        return output, complete_batch
+        reply["batch"] = merged_replies
+
+        self.redis.set(batch_key, json.dumps(reply))
+        self.redis.expire(key, 3600)
+
+        update(self.db, user_id, file_name, reply, "video")
+
 
     def process_image(self, body):
-
         origin = body['origin']
-        image_id = body['img_name']
         user = body["user_id"]
         data = body["reply"]
-        file_name = body['file_name']
+        image_id = body['img_name']
+        file_name = body['file_name'] # Uno tiene extension y otro no
         upload = body['upload']
         del body['origin']
 
-        current_image = self.current_images.get(image_id, {})
+        key = f'{user}-{image_id}'
+        current_image = self.current_images.get(key, {})
         current_image[origin] = data
-        self.current_images[image_id] = current_image
+        self.current_images[key] = current_image
         
         if len(current_image) == 2:
             batch = {
@@ -136,73 +110,27 @@ class Joiner():
             }
             reply = {"user_id": user, "img_name": image_id, "batch": batch}
             
-            key = f'{user}-{image_id}'
             self.redis.rpush(key, json.dumps(reply))
             self.redis.expire(key, 3600)
-            self.current_images.pop(image_id)
+            self.current_images.pop(key)
             if upload:
                 update(self.db, user, file_name, reply, "image")
-        
-        return None, False
+
 
     def _check_batch(self, body: dict):
-        # puede ser de arousal o valencia
         body = json.loads(body.decode())
-
-        if "EOF" in body:
-            amount = body["total"]
-            user = body["EOF"]
-            self.last_amount[user] = amount
-            self.remove_user(user)
-            return None, False
-        elif "img_name" in body:
-            return self.process_image(body)
+        if "img_name" in body:
+            self.process_image(body)
+        elif "EOF" in body:
+            # TODO: En caso de ser necesitado en el futuro se puede usar este mensaje
+            # para acciones de control (borrar users, etc.). Llega cada vez que termina
+            # un video. Puede llegar mas de uno al haber mas de un processor.
+            pass
         else:
-            return self.process_income(body)
+            self.process_video(body)
 
     def _callback(self, body: dict, ack_tag):     
-        batch, complete_batch = self._check_batch(body)
-        if not complete_batch:
-            return
-        # si hubo merge, esto se sigue
-        user = batch['user_id']
-        batch_id = int(batch['batch_id'])
-        file_name = batch['file_name']
-        upload = batch['upload']
-
-        # logging.info(f"Recibo batch {batch_id} de {user} -- batch {batch}")
-        
-        current_batches = self.current_batches.get(user, [])
-        insort(current_batches, (batch_id, batch["replies"]))
-
-        last_sent = self.last_batches.get(user, -1)
-        first_batch = current_batches[0][0]
-        while first_batch == last_sent + 1:
-            data = current_batches.pop(0)[1]
-            last_sent += 1
-            self.last_batches[user] = last_sent
-            # Chequear si para tpdp el batch tengo info (arousal y valencia)
-            reply = {"user_id": user, "batch_id": first_batch, "batch": data}
-
-            # logging.info(f"Sending batch {first_batch} de {user}")
-            # logging.info(f"Len batch {len(json.dumps(reply))}")
-            # self.output_queue.send(json.dumps(reply))
-            # self.pusher_client.trigger('my-channel', 'my-event', reply)
-            logging.info(f"Sending batch {batch_id} de {user}: {datetime.datetime.now()}")
-
-            key = f'{user}-{file_name}-{batch_id}'
-            self.redis.set(key, json.dumps(reply))
-            self.redis.expire(key, 3600)
-
-            if upload:
-                update(self.db, user, file_name, reply, "video")
-            
-            if len(current_batches) == 0:
-                break
-            first_batch = current_batches[0][0]
-        
-        self.current_batches[user] = current_batches
-        self.remove_user(user)
+        self._check_batch(body)
 
     def run(self):
         self.input_queue.receive(self._callback)
