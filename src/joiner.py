@@ -2,16 +2,10 @@ from common.connection import Connection
 import ujson as json
 import signal
 import logging
-from bisect import insort
 import redis
-import datetime
-import os
-from dotenv import load_dotenv
 import pymongo
 from .crud import update
-
-load_dotenv()
-
+from .config.config import settings
 
 class Joiner():
     def __init__(self):
@@ -24,29 +18,27 @@ class Joiner():
         self.init_conn()
 
         self.redis = redis.Redis(
-            host=os.getenv("REDIS_HOST"),
-            port=10756,
-            password=os.getenv("REDIS_PASSWORD")
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            password=settings.REDIS_PASSWORD
         )
 
-        mongo_client = pymongo.MongoClient(os.getenv("MONGODB_URL"))
-        db_name = os.getenv("MONGODB_DB_NAME")
+        mongo_client = pymongo.MongoClient(settings.MONGODB_URL)
+        db_name = settings.MONGODB_DB_NAME
         self.db = mongo_client[db_name]
 
     def init_conn(self):
-        remote_rabbit = os.getenv('REMOTE_RABBIT', False)
+        remote_rabbit = settings.REMOTE_RABBIT
         if remote_rabbit:
-            self.connection = Connection(host=os.getenv('RABBIT_HOST'), 
-                                    port=os.getenv('RABBIT_PORT'),
-                                    virtual_host=os.getenv('RABBIT_VHOST'), 
-                                    user=os.getenv('RABBIT_USER'), 
-                                    password=os.getenv('RABBIT_PASSWORD'))
+            self.connection = Connection(host=settings.RABBIT_HOST, 
+                                    port=settings.RABBIT_PORT,
+                                    virtual_host=settings.RABBIT_VHOST, 
+                                    user=settings.RABBIT_USER, 
+                                    password=settings.RABBIT_PASSWORD)
         else:
-            # selfconnection = Connection(host="rabbitmq-0.rabbitmq.default.svc.cluster.local", port=5672)
             self.connection = Connection(host="rabbitmq", port=5672)
 
         self.input_queue = self.connection.Consumer(queue_name="processed")
-        self.output_queue = self.connection.Producer(queue_name="ordered_batches")
 
     def _handle_sigterm(self, *args):
         """
@@ -80,7 +72,7 @@ class Joiner():
         reply["batch"] = merged_replies
 
         self.redis.set(batch_key, json.dumps(reply))
-        self.redis.expire(key, 3600)
+        self.redis.expire(key, settings.REDIS_TTL)
 
         update(self.db, user_id, file_name, reply, "video")
 
@@ -111,7 +103,7 @@ class Joiner():
             reply = {"user_id": user, "img_name": image_id, "batch": batch}
             
             self.redis.rpush(key, json.dumps(reply))
-            self.redis.expire(key, 3600)
+            self.redis.expire(key, settings.REDIS_TTL)
             self.current_images.pop(key)
             if upload:
                 update(self.db, user, file_name, reply, "image")
