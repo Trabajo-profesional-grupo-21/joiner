@@ -31,3 +31,10 @@ jobs:
 
     - name: Push Docker image
       run: docker push tppg21/joiner:$(git rev-parse --short HEAD)
+
+    - name: Add latest tag and push (just in main)
+      if: github.ref == 'refs/heads/main'
+      run: |
+        IMAGE_TAG=$(git rev-parse --short HEAD)
+        docker tag tppg21/joiner:$IMAGE_TAG tppg21/joiner:latest
+        docker push tppg21/joiner:latest
