@@ -6,6 +6,7 @@ import redis
 import pymongo
 from .crud import update
 from .config.config import settings
+import time
 
 class Joiner():
     def __init__(self):
@@ -27,18 +28,28 @@ class Joiner():
         db_name = settings.MONGODB_DB_NAME
         self.db = mongo_client[db_name]
 
-    def init_conn(self):
-        remote_rabbit = settings.REMOTE_RABBIT
-        if remote_rabbit:
-            self.connection = Connection(host=settings.RABBIT_HOST, 
-                                    port=settings.RABBIT_PORT,
-                                    virtual_host=settings.RABBIT_VHOST, 
-                                    user=settings.RABBIT_USER, 
-                                    password=settings.RABBIT_PASSWORD)
-        else:
-            self.connection = Connection(host="rabbitmq", port=5672)
+    def init_conn(self, retries = 10, delay = 5):
+        for attempt in range(retries):
+            try:
+                remote_rabbit = settings.REMOTE_RABBIT
+                if remote_rabbit:
+                    self.connection = Connection(host=settings.RABBIT_HOST, 
+                                            port=settings.RABBIT_PORT,
+                                            virtual_host=settings.RABBIT_VHOST, 
+                                            user=settings.RABBIT_USER, 
+                                            password=settings.RABBIT_PASSWORD)
+                else:
+                    self.connection = Connection(host="rabbitmq", port=5672)
 
-        self.input_queue = self.connection.Consumer(queue_name="processed")
+                self.input_queue = self.connection.Consumer(queue_name="processed")
+
+                break
+            except Exception as e:
+                print(f"RabbitMQ connection attempt {attempt + 1} failed: {e}")
+                if attempt < retries - 1:
+                    time.sleep(delay)
+                else:
+                    raise e
 
     def _handle_sigterm(self, *args):
         """
